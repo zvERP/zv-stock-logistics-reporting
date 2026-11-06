@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Based on OCA/stock-logistics-reporting stock_picking_report_valued (16.0),
+    Copyright Tecnativa. License AGPL-3.0 or later.
+
+    Instead of valuing the standard Delivery Slip depending on the partner,
+    this module adds a second report, "Delivery Slip (Valued)", to the Print
+    menu. It renders the very same stock.report_deliveryslip template with the
+    QWeb variable `print_valued` set, and the extensions below only show the
+    amounts when that variable is set.
+-->
+<odoo>
+
+    <record id="action_report_delivery_valued" model="ir.actions.report">
+        <field name="name">Delivery Slip (Valued)</field>
+        <field name="model">stock.picking</field>
+        <field name="report_type">qweb-pdf</field>
+        <field
+            name="report_name"
+        >stock_picking_report_valued_print.report_deliveryslip_valued</field>
+        <field
+            name="report_file"
+        >stock_picking_report_valued_print.report_deliveryslip_valued</field>
+        <field
+            name="print_report_name"
+        >'Delivery Slip (Valued) - %s - %s' % (object.partner_id.name or '', object.name)</field>
+        <field name="binding_model_id" ref="stock.model_stock_picking" />
+        <field name="binding_type">report</field>
+    </record>
+
+    <template id="report_deliveryslip_valued">
+        <t t-set="print_valued" t-value="True" />
+        <t t-call="stock.report_deliveryslip" />
+    </template>
+
+    <template
+        id="report_delivery_document_valued"
+        inherit_id="stock.report_delivery_document"
+        priority="99"
+    >
+        <xpath expr="//div[hasclass('page')]" position="before">
+            <t
+                t-set="show_valued"
+                t-value="bool(print_valued and o.picking_type_code == 'outgoing' and o.sale_id and o.move_line_ids)"
+            />
+        </xpath>
+        <xpath expr="//th[@name='th_sml_quantity']" position="after">
+            <t t-if="show_valued">
+                <th name="th_sml_unit_price" class="text-end">
+                    <strong>Unit Price</strong>
+                </th>
+                <th
+                    name="th_sml_discount"
+                    class="text-end"
+                    groups="product.group_discount_per_so_line"
+                >
+                    <strong>Discount</strong>
+                </th>
+                <th name="th_sml_subtotal" class="text-end">
+                    <strong>Subtotal</strong>
+                </th>
+                <th name="th_sml_taxes" class="text-end">
+                    <strong>Taxes</strong>
+                </th>
+            </t>
+        </xpath>
+        <!-- Valued lines are printed one per move line (no "Ordered" column) -->
+        <xpath expr="//th[@name='th_sml_qty_ordered']" position="attributes">
+            <attribute name="t-if" add="and not show_valued" separator=" " />
+        </xpath>
+        <!--
+            Force the per move line branch when valued. The xpaths target the
+            parent of each move line loop so they keep matching even when other
+            modules (e.g. OCA stock_picking_report_valued) have already
+            modified the t-if attribute.
+        -->
+        <xpath
+            expr="//tr[@t-foreach='package_move_lines'][@t-as='move_line']/.."
+            position="attributes"
+        >
+            <attribute name="t-if" add="or show_valued" separator=" " />
+        </xpath>
+        <xpath
+            expr="//t[@name='no_package_move_lines']//tr[@t-foreach='move_lines'][@t-as='move_line']/.."
+            position="attributes"
+        >
+            <attribute name="t-if" add="or show_valued" separator=" " />
+        </xpath>
+        <xpath
+            expr="//tr[@t-foreach='o.move_line_ids'][@t-as='move_line']/.."
+            position="attributes"
+        >
+            <attribute name="t-if" add="or show_valued" separator=" " />
+        </xpath>
+        <xpath expr="//table[@name='stock_move_line_table']" position="after">
+            <t t-if="show_valued">
+                <table class="table table-sm mt32" name="valued_picking_amounts">
+                    <thead>
+                        <tr>
+                            <th class="text-end">
+                                <strong>Untaxed Amount</strong>
+                            </th>
+                            <th class="text-end">
+                                <strong>Taxes</strong>
+                            </th>
+                            <th class="text-end">
+                                <strong>Total</strong>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="text-end">
+                                <span t-field="o.amount_untaxed" />
+                            </td>
+                            <td class="text-end">
+                                <span t-field="o.amount_tax" />
+                            </td>
+                            <td class="text-end">
+                                <span t-field="o.amount_total" />
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <!--
+                    Total Picking block.
+                    This block is displayed only when the value returned by
+                    _get_report_valued_total_amount() differs from amount_total.
+
+                    It is intended as an extension point for other modules that need to
+                    add extra amounts (taxes, fees, surcharges, etc.) to the printed
+                    picking total.
+                -->
+                <div
+                    id="valued_picking_total_block"
+                    name="valued_picking_total_block"
+                    class="col-6 ms-auto mt16"
+                    t-if="o._show_report_valued_total_block()"
+                >
+                    <table
+                        class="table table-sm"
+                        name="valued_picking_total_table"
+                        style="background-color: rgba(0, 0, 0, 0.1);"
+                    >
+                        <tr>
+                            <td>
+                                <strong>Total</strong>
+                            </td>
+                            <td class="text-end">
+                                <strong
+                                    t-out="o._get_report_valued_total_amount()"
+                                    t-options="{'widget': 'monetary', 'display_currency': o.currency_id or o.company_id.currency_id}"
+                                />
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </t>
+        </xpath>
+    </template>
+
+    <template
+        id="report_delivery_has_serial_move_line_valued"
+        inherit_id="stock.stock_report_delivery_has_serial_move_line"
+        priority="99"
+    >
+        <xpath expr="//td[@name='move_line_lot_qty_done']" position="after">
+            <t t-if="show_valued">
+                <td name="td_sml_unit_price" class="text-end">
+                    <span t-field="move_line.sale_price_unit" />
+                </td>
+                <td
+                    name="td_sml_discount"
+                    class="text-end"
+                    groups="product.group_discount_per_so_line"
+                >
+                    <span t-field="move_line.sale_discount" />
+                </td>
+                <td name="td_sml_subtotal" class="text-end">
+                    <span
+                        t-field="move_line.sale_price_subtotal"
+                        t-options="{
+                                'widget': 'monetary',
+                                'display_currency': (
+                                    move_line.currency_id
+                                    or move_line.move_id.sale_line_id.currency_id
+                                    or move_line.company_id.currency_id
+                                ) }"
+                    />
+                </td>
+                <td name="td_sml_taxes" class="text-end">
+                    <span t-field="move_line.sale_tax_description" />
+                </td>
+            </t>
+        </xpath>
+    </template>
+
+</odoo>
